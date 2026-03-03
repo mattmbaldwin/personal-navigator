@@ -13,6 +13,21 @@ DATE_PATTERN = re.compile(
 )
 NUMERIC_DATE_RE = re.compile(r'\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{4}\b')
 
+DUTY_RE = re.compile(
+    r'(?<![a-z])'                         # not mid-word
+    r'('
+    r'you must\b'
+    r'|you will need to\b'
+    r'|you are required to\b'
+    r'|must be (signed|completed|provided|submitted)\b'
+    r'|provide evidence\b'
+    r'|provide a (copy|document|statement)\b'
+    r'|failure to\b'
+    r'|you should (tell|notify|contact)\b'
+    r')',
+    re.IGNORECASE
+)
+
 
 def make_snippet(full_text, match, context=60):
     """Return the matched value plus up to `context` chars either side, with ellipses."""
@@ -44,6 +59,27 @@ def print_table(title, headers, rows):
         total_width = sum(col_widths) + 3 * (len(headers) - 1)
         print("| " + empty_msg.ljust(total_width) + " |")
     print(divider)
+
+
+def extract_sentence(text, match, max_len=200):
+    """
+    Walk backwards to the nearest sentence boundary before the match,
+    and forwards to the nearest boundary after — giving a clean, readable duty.
+    """
+    boundaries = r'[.!?\n]'
+    before = text[:match.start()]
+    after = text[match.end():]
+
+    start_boundary = max(
+        (m.end() for m in re.finditer(boundaries, before)),
+        default=max(0, match.start() - max_len)
+    )
+    end_boundary_match = re.search(boundaries, after)
+    end_boundary = match.end() + (end_boundary_match.start() + 1 if end_boundary_match else max_len)
+    end_boundary = min(end_boundary, match.start() + max_len)
+
+    sentence = text[start_boundary:end_boundary].replace('\n', ' ').strip()
+    return f'"{sentence}"'
 
 
 def find_entries(all_lines, name_label, balance_label):
@@ -107,6 +143,22 @@ for page_num, text in enumerate(pages_text, start=1):
             dates_found = True
 if not dates_found:
     print("No dates found.\n")
+
+# ── Duties with citations ─────────────────────────────────────────────────────
+print("=" * 60)
+print("DUTIES")
+print("=" * 60)
+seen_duties = set()
+duties_found = False
+for page_num, text in enumerate(pages_text, start=1):
+    for match in DUTY_RE.finditer(text):
+        sentence = extract_sentence(text, match)
+        if sentence not in seen_duties:
+            seen_duties.add(sentence)
+            print(f"[p.{page_num}]  {sentence}\n")
+            duties_found = True
+if not duties_found:
+    print("No duties found.\n")
 
 # ── Bank Accounts table ───────────────────────────────────────────────────────
 bank_entries = find_entries(
